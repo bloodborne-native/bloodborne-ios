@@ -42,6 +42,11 @@ The app's `Documents` (Finder's Files tab) holds `game/` (the dump), `boot-linke
 `runtime/scripts/patches.py` for the phone's resolution, and the saves (`mac-save/` for a copy of
 the Mac's, `user/` for the phone's own).
 
+The app's switches (`app/app_main.c`): `BB_IOS_SAVE` (`mac-save` or the phone's own), and the
+probes `BB_IOS_CPU_ONLY`, `BB_IOS_PROBE_ONLY`, `BB_IOS_METAL_TEST`, `BB_IOS_FILE_TEST`,
+`BB_IOS_GUARD_TEST`. devicectl keeps environment variables between launches, so a switch is turned
+off with `0`, not by leaving it out.
+
 ## License
 
 GPL-2.0-or-later, as the runtime.
