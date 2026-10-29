@@ -1,4 +1,4 @@
-/* iOS proof of concept (branch ios-poc), before milestone P2: can Metal use guest memory as it is
+/* iOS proof of concept, before milestone P2: can Metal use guest memory as it is
  * on iOS (a mapped file, no second view) without that memory counting against the app's limit?
  * BB_IOS_METAL_TEST=MiB maps an unlinked temporary file of that size, wraps it in one Metal
  * buffer without a copy, has the GPU fill every byte, checks a few pages on the CPU and logs the

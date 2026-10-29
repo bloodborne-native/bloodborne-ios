@@ -13,12 +13,12 @@ Built on [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside28
 - `scripts/`: building, signing and installing the app (`build-app.sh`), measuring on the phone
   (`trial.sh`, `press.sh`, `profile.py`) and finding a crash (`bisect.sh`).
 - `runtime/`: [bloodborne-runtime](https://github.com/bloodborne-native/bloodborne-runtime) (the
-  game, with the recompiler in `runtime/recomp/`), on its `ios-poc` branch for now.
+  game, with the recompiler in `runtime/recomp/`), on its `main` (the iOS code behind `TARGET_OS_IPHONE`, merged 2026-10-29).
 - `launcher/`: [bloodborne-launcher](https://github.com/bloodborne-native/bloodborne-launcher), to
   become the app's interface.
 
 What runs where, the measurements and what the iPhone does not allow: the runtime's
-[`docs/IOS_POC.md`](https://github.com/bloodborne-native/bloodborne-runtime/blob/ios-poc/docs/IOS_POC.md).
+[`docs/IOS_POC.md`](https://github.com/bloodborne-native/bloodborne-runtime/blob/main/docs/IOS_POC.md).
 The plan: bloodborne-mac's [roadmap](https://github.com/bloodborne-native/bloodborne-mac/blob/main/docs/ROADMAP.md),
 section 9.
 

@@ -1,4 +1,4 @@
-/* iOS proof of concept (branch ios-poc): the app around bb-probe. SDL3 runs the iOS application;
+/* iOS proof of concept: the app around bb-probe. SDL3 runs the iOS application;
  * the runtime (src/probe.c, compiled with -Dmain=bb_probe_main) runs on its own thread with the
  * files the Mac prepared, all in the app's Documents folder (shared with Finder and Files):
  *   game/                 the game folder (CUSA03173 with 1.09 merged)

@@ -3,13 +3,13 @@
 The iOS app of Bloodborne (PS4, CUSA03173 1.09): the app shell, its build, signing and install
 scripts, and what being an app on the iPhone means (touch controls, files, the launcher as its
 interface). Private while it is a proof of concept. The game is the `runtime/` submodule
-(bloodborne-runtime, on `ios-poc` for now) with the recompiler in `runtime/recomp/`; the launcher
+(bloodborne-runtime, on its `main`: the iOS code is behind `TARGET_OS_IPHONE` there since 2026-10-29) with the recompiler in `runtime/recomp/`; the launcher
 is `launcher/`.
 
 ## Read first
 
 - `README.md`: layout, build and install.
-- The runtime's `docs/IOS_POC.md` (branch `ios-poc`): measurements, limits, findings.
+- The runtime's `docs/IOS_POC.md`: measurements, limits, findings.
 - bloodborne-mac's `docs/ARCHITECTURE.md` ("Where code lives") and `docs/ROADMAP.md` section 9.
 
 ## Where code goes
