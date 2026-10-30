@@ -37,12 +37,32 @@ bash runtime/scripts/ios/recomp.sh                     # runtime/out/ios/libreco
 BB_IOS_TEAM=<team> BB_IOS_DEVICE=<udid> bash scripts/build-app.sh   # builds, signs, installs
 ```
 
+One app, in progress: `scripts/build-launcher.sh` (the same variables, `BB_LAUNCHER` for a
+launcher checkout with `npm ci` done, `BB_LAUNCHER_CONFIG=debug` for a debug build; release by
+default) builds bloodborne-launcher's iOS app with the game inside; its Play starts the game
+(`bb_ios_start_game` in `app/app_main.c`, built with `BB_IOS_IN_LAUNCHER`): the launcher's window
+is destroyed, the phone turns to landscape behind a black cover, and the game runs from a main
+run-loop timer (inside the launcher's main-queue block, iOS delivered it no touches). Its
+`Documents` holds the same files, with the launcher's database and `bbport.ini`.
+
+The limit is the address space, not memory. Without the paid entitlements the host gets about
+2 GiB below the shared cache, plus the 6 GiB block that holds the game's image and memory pool.
+At Play the launcher uses 1.3-1.6 GiB of the 2 GiB (WebKit's JavaScriptCore region is 256 MiB or,
+once grown, 512 MiB; the recompiled library 350 MiB) and the game's start needs about 410 MiB more,
+including single blocks of 34 MiB (the rasterizer) and 128 MiB (a Metal buffer). The game starts
+when WebKit has not grown (largest free gap ~270 MiB at Play, 92 MiB once running) and fails to
+allocate when it has. iOS refuses `execve` (Operation not permitted): no smaller program can take
+the launcher's place. The recompiled library is loaded when the app loads; placed in the 6 GiB
+block it leaves the game's pool no room, or iOS does not map it there at all.
+
 The app's `Documents` (Finder's Files tab) holds `game/` (the dump), `boot-linked.bin` and
 `content.bin` from the Mac build's `runtime/out/`, `patches.bin` written by
 `runtime/scripts/patches.py` for the phone's resolution, and the saves (`mac-save/` for a copy of
 the Mac's, `user/` for the phone's own).
 
-The app's switches (`app/app_main.c`): `BB_IOS_SAVE` (`mac-save` or the phone's own), and the
+The app's switches (`app/app_main.c`): `BB_IOS_SAVE` (`mac-save` or the phone's own),
+`BB_IOS_EVENT_LOG` (SDL logs its events into the log), `BB_IOS_WEBKIT_HEAP` (the launcher build:
+WebKit's own allocator instead of the system's), and the
 probes `BB_IOS_CPU_ONLY`, `BB_IOS_PROBE_ONLY`, `BB_IOS_METAL_TEST`, `BB_IOS_FILE_TEST`,
 `BB_IOS_GUARD_TEST`. devicectl keeps environment variables between launches, so a switch is turned
 off with `0`, not by leaving it out.

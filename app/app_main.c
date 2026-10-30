@@ -10,8 +10,12 @@
  * Milestone P1: --cpu-only, nothing drawn. The recompiled library is the app's
  * Frameworks/librecomp.dylib; with no JIT on iOS the rest of the game's code is interpreted. */
 #include <SDL3/SDL.h>
+#ifdef BB_IOS_IN_LAUNCHER
+#define SDL_MAIN_HANDLED /* the launcher's app (Tauri) owns main: only SDL_SetMainReady */
+#endif
 #include <SDL3/SDL_main.h>
 
+#include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 /* In libSystem on iOS too, but not in the iOS SDK headers. */
 int proc_regionfilename(int pid, uint64_t address, void *buffer, uint32_t buffersize);
@@ -27,6 +31,7 @@ int proc_regionfilename(int pid, uint64_t address, void *buffer, uint32_t buffer
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -65,10 +70,76 @@ static void *tee_log(void *unused) {
     return NULL;
 }
 
+/* The log's pipe, its file and the original console (the first initializer opens them). */
+static int pipe_fds[2] = {-1, -1}, log_fd = -1, console_fd = -1;
+/* stdout through the pipe (file and console), stderr straight into the file. */
+static void attach_log(void) {
+    if (log_fd < 0 || pipe_fds[1] < 0) return;
+    dup2(pipe_fds[1], 1);
+    /* stderr straight into the file: the runtime's fault report is written there and then
+     * _exit(1) ends the tee thread, so through the pipe it was lost. */
+    dup2(log_fd, 2);
+}
+
+/* Before the app exits: what is still in the log's pipe reaches the file and the console (exit
+ * ends the tee thread with it, and a runtime that stops at once left an empty log). At most 2 s. */
+static void drain_log(void) {
+    fflush(NULL);
+    for (int waited = 0; tee_fds[0] >= 0 && waited < 200; ++waited) {
+        int pending = 0;
+        if (ioctl(tee_fds[0], FIONREAD, &pending) || pending <= 0) break;
+        usleep(10000);
+    }
+    usleep(50000); /* the tee thread's last write */
+}
+
+/* Any exit: where it came from, into the log (exit(1) with nothing logged before it). */
+static void exit_backtrace(void) {
+    void *frames[64];
+    const int count = backtrace(frames, 64);
+    dprintf(2, "iOS PoC: exit; backtrace:\n");
+    backtrace_symbols_fd(frames, count, 2);
+    drain_log();
+}
+
+/* The low address space (from the app's own image to the shared cache, where the host's
+ * allocations go): its largest free gap, what uses it by memory tag (1-11 malloc, 21 IOKit,
+ * 30 stacks, 33 dylibs, 63 JavaScriptCore; 0 untagged: mapped files and plain mmap), and the memory
+ * left under the app's limit, to fd 2 (the log file): at the game's start and at an abort. */
+static void report_room(const char *when) {
+    const vm_address_t shared_cache = (vm_address_t)0x180000000;
+    vm_address_t at = (vm_address_t)1 << 32, previous_end = 0;
+    vm_size_t largest = 0, used = 0, by_tag[256] = {0};
+    for (;;) {
+        vm_size_t size = 0;
+        natural_t depth = 0;
+        vm_region_submap_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+        const int found = vm_region_recurse_64(mach_task_self(), &at, &size, &depth, (vm_region_recurse_info_t)&info, &count) == KERN_SUCCESS;
+        if (!found || at >= shared_cache) {
+            if (previous_end && shared_cache > previous_end && shared_cache - previous_end > largest) largest = shared_cache - previous_end;
+            break;
+        }
+        /* From the first region on (the app's image): below it is the zero page's edge. */
+        if (previous_end && at > previous_end && at - previous_end > largest) largest = at - previous_end;
+        const vm_address_t end = at + size < shared_cache ? at + size : shared_cache;
+        by_tag[info.user_tag & 255] += end - at;
+        used += end - at;
+        previous_end = end;
+        at += size;
+    }
+    dprintf(2, "iOS PoC: room %s: largest free gap %lu MiB, %lu MiB used below the shared cache, %lu MiB left under the memory limit; by tag:",
+            when, (unsigned long)(largest >> 20), (unsigned long)(used >> 20), (unsigned long)(os_proc_available_memory() >> 20));
+    for (int tag = 0; tag < 256; ++tag)
+        if (by_tag[tag] >= ((vm_size_t)8 << 20)) dprintf(2, " %d=%lu", tag, (unsigned long)(by_tag[tag] >> 20));
+    dprintf(2, " MiB\n");
+}
+
 /* An abort before main (an initializer): its backtrace into the log. */
 static void abort_backtrace(int signal) {
     void *frames[64];
     const int count = backtrace(frames, 64);
+    report_room("at the abort");
     dprintf(2, "iOS PoC: signal %d; backtrace:\n", signal);
     backtrace_symbols_fd(frames, count, 2);
     _exit(128 + signal);
@@ -81,12 +152,10 @@ __attribute__((constructor(100))) static void measure_free_block(void) {
     char log[1100];
     snprintf(log, sizeof(log), "%s/Documents/bb-ios.log", home ? home : ".");
     /* Into the log file and to the original console too (devicectl ... --console streams it). */
-    static int pipe_fds[2], log_fd, console_fd;
-    log_fd = open(log, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    log_fd = open(log, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0644);
     console_fd = dup(2);
     if (log_fd >= 0 && console_fd >= 0 && !pipe(pipe_fds)) {
-        dup2(pipe_fds[1], 1);
-        dup2(pipe_fds[1], 2);
+        attach_log();
         setvbuf(stdout, NULL, _IOLBF, 0);
         pthread_t tee;
         if (!pthread_create(&tee, NULL, tee_log, NULL)) pthread_detach(tee);
@@ -94,6 +163,7 @@ __attribute__((constructor(100))) static void measure_free_block(void) {
     }
     printf("iOS PoC: log open (first initializer)\n");
     signal(SIGABRT, abort_backtrace);
+    atexit(exit_backtrace);
     /* The GPU library's paths are made by a static initializer (path_util.cpp: its user folders
      * under BB_GPU_USER_DIR, else under the working directory, "/" before main): set before it. */
     char user[1100];
@@ -109,6 +179,35 @@ __attribute__((constructor(100))) static void measure_free_block(void) {
         }
     }
 }
+
+#ifdef BB_IOS_IN_LAUNCHER
+#include <libgen.h>
+#include <mach-o/dyld.h>
+/* The recompiled library (about 350 MB) needs one gap of its size in the address space. Inside
+ * the launcher, Play comes after its web view and the rest of the app have used the large gaps
+ * (mmap failed with ENOMEM), so it is loaded here, when the app loads; start() then finds it
+ * loaded. Its pages are mapped from the file, so an unused library costs little memory. */
+/* WebKit's allocators reserve address space in the app's own process: 256 MiB tagged 53 (bmalloc)
+ * and 256-512 MiB tagged 63 (JavaScriptCore) at Play, of the ~2 GiB the game's start also needs.
+ * The system allocator instead (Malloc=1) and no Gigacage: set before the web view is made.
+ * BB_IOS_WEBKIT_HEAP=1 leaves WebKit's own (comparisons). */
+__attribute__((constructor(100))) static void small_webkit_heap(void) {
+    if (switch_on("BB_IOS_WEBKIT_HEAP")) return;
+    setenv("Malloc", "1", 0);
+    setenv("GIGACAGE_ENABLED", "no", 0);
+}
+__attribute__((constructor(103))) static void load_recompiled_library(void) {
+    char executable[1024];
+    uint32_t size = sizeof(executable);
+    if (_NSGetExecutablePath(executable, &size)) return;
+    char library[1100];
+    snprintf(library, sizeof(library), "%s/Frameworks/librecomp.dylib", dirname(executable));
+    if (access(library, R_OK)) return;
+    if (dlopen(library, RTLD_NOW | RTLD_LOCAL)) printf("iOS PoC: recompiled library loaded when the app loaded\n");
+    else printf("iOS PoC: loading the recompiled library failed: %s\n", dlerror());
+}
+
+#endif
 
 /* Which parts of the address space iOS lets this app reserve (the guest layout must fit there):
  * a 1 GiB fixed reservation tried every 8 GiB up to 1 TiB, then released. */
@@ -302,14 +401,13 @@ static void *run_game(void *unused) {
     while (argv[argc]) ++argc;
     int code = bb_probe_main(argc, argv);
     printf("iOS PoC: the runtime returned %d\n", code);
-    fflush(NULL);
+    drain_log();
     exit(code);
 }
 
-int main(int argc, char **argv) {
-    (void)argc; (void)argv;
-    const char *home = getenv("HOME");
-    snprintf(documents, sizeof(documents), "%s/Documents", home ? home : ".");
+/* Sets up and runs the game; returns only if it could not start (as main's exit code). */
+static int start(const char *data_dir) {
+    snprintf(documents, sizeof(documents), "%s", data_dir);
     if (chdir(documents)) return 1;
     /* The recompiled library inside the app; the translator's JIT is compiled out on iOS. */
     const char *base = SDL_GetBasePath();
@@ -361,7 +459,11 @@ int main(int argc, char **argv) {
          * targets, memory and address space. */
         {"BB_RENDER_RES", "960x540"}, {"BB_OUTPUT_RES", "960x540"}, {"BB_AUTO_RENDER_RES", "1"},
         {"BB_PRESENT_DUMP_TRIGGER", grab_trigger}, {"BB_DUMP_DIR", grab_dir},
+#ifdef BB_IOS_IN_LAUNCHER
+        {"BB_TEST_TITLE", "One app: the game from the launcher's Play"},
+#else
         {"BB_TEST_TITLE", "iOS PoC P2: Metal on the iPhone"},
+#endif
         {"BB_TEST_DETAIL", "Native 1080p, recompiled library, no JIT, file-backed guest memory"},
     };
     for (size_t i = 0; i < sizeof(defaults) / sizeof(*defaults); ++i) setenv(defaults[i][0], defaults[i][1], 0);
@@ -405,3 +507,52 @@ int main(int argc, char **argv) {
         SDL_Delay(100);
     }
 }
+
+#ifdef BB_IOS_IN_LAUNCHER
+/* bloodborne-launcher's Play (its platform.rs, start_in_app) on the main thread, from the main
+ * dispatch queue: UIKit is already up (Tauri's), so SDL's main does not run. DATA_DIR is the
+ * launcher's data folder, the app's Documents as here. */
+void bb_ios_landscape(void); /* orientation.m */
+static char launcher_data_dir[1024];
+/* The game, from a run-loop timer on the main thread (as SDL's own main starts it): run from the
+ * launcher's block on the main dispatch queue, it never returned, and UIKit then delivered no
+ * touch to SDL's window (the main queue runs one block at a time). */
+static void start_from_timer(CFRunLoopTimerRef timer, void *unused) {
+    (void)unused;
+    CFRunLoopTimerInvalidate(timer);
+    CFRelease(timer);
+    report_room("from the timer, after the launcher's window was destroyed");
+    const int code = start(launcher_data_dir);
+    printf("iOS PoC: the game could not start (%d)\n", code);
+}
+int bb_ios_start_game(const char *data_dir) {
+    /* Once: the call returns at once, and a second Play while the first game was still loading
+     * made a second game window ("Only one window allowed per display"). */
+    static int started;
+    if (started) return 0;
+    started = 1;
+    /* The launcher's own start-up (Tauri) points stdout and stderr elsewhere after the first
+     * initializer: back to the game's log. */
+    attach_log();
+    SDL_SetMainReady();
+    /* The game plays in landscape: the phone turns before the window opens, and SDL's window
+     * refuses portrait while it runs. */
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    /* BB_IOS_EVENT_LOG=1: SDL logs its events (into the log): does a touch reach SDL? */
+    if (switch_on("BB_IOS_EVENT_LOG")) SDL_SetHint(SDL_HINT_EVENT_LOGGING, "1");
+    bb_ios_landscape();
+    report_room("when the game starts");
+    snprintf(launcher_data_dir, sizeof(launcher_data_dir), "%s", data_dir);
+    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0, 0, 0, start_from_timer, NULL);
+    CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+    return 0; /* started: the timer runs the game once this block returns */
+}
+#else
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
+    const char *home = getenv("HOME");
+    char data_dir[1024];
+    snprintf(data_dir, sizeof(data_dir), "%s/Documents", home ? home : ".");
+    return start(data_dir);
+}
+#endif
