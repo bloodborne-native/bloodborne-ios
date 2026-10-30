@@ -1,8 +1,10 @@
 /* iOS proof of concept: the app around bb-probe. SDL3 runs the iOS application;
  * the runtime (src/probe.c, compiled with -Dmain=bb_probe_main) runs on its own thread with the
  * files the Mac prepared, all in the app's Documents folder (shared with Finder and Files):
- *   game/                 the game folder (CUSA03173 with 1.09 merged)
- *   boot-linked.bin, content.bin, patches.bin   from run.sh on the Mac (runtime out/)
+ *   game/                 the game folder (CUSA03173 with 1.09 merged): the runtime prepares its
+ *                         executable and links its system modules here, in memory (`-`)
+ *   patches.bin           from run.sh on the Mac (runtime out/)
+ *   boot-linked.bin, content.bin   from the Mac too, only with BB_IOS_PREPARE=0
  *   user/                 saves (created when missing)
  *   bb-ios.log            the runtime's output
  * Milestone P1: --cpu-only, nothing drawn. The recompiled library is the app's
@@ -281,9 +283,21 @@ static void *run_game(void *unused) {
     mkdir(user, 0755);
     const char *timeout = getenv("BB_IOS_TIMEOUT");
     const int cpu_only = switch_on("BB_IOS_CPU_ONLY");
-    char *argv[] = {"bb-probe", boot, "--content-profile", content, "--patches", patches, "--app0", game,
-                    "--user", user, "--timeout", (char *)(timeout ? timeout : "0"), cpu_only ? "--cpu-only" : NULL, NULL};
-    printf("iOS PoC: starting the runtime (%s)\n", cpu_only ? "CPU only" : "Metal");
+    /* The executable prepared on the phone from game/ (the runtime's `-`), unless BB_IOS_PREPARE=0:
+     * then the files the Mac prepared. */
+    const char *prepare = getenv("BB_IOS_PREPARE");
+    const int on_phone = !(prepare && !strcmp(prepare, "0"));
+    char *argv[16];
+    int n = 0;
+    argv[n++] = "bb-probe";
+    argv[n++] = on_phone ? "-" : boot;
+    if (!on_phone) argv[n++] = "--content-profile", argv[n++] = content;
+    argv[n++] = "--patches", argv[n++] = patches, argv[n++] = "--app0", argv[n++] = game;
+    argv[n++] = "--user", argv[n++] = user, argv[n++] = "--timeout", argv[n++] = (char *)(timeout ? timeout : "0");
+    if (cpu_only) argv[n++] = "--cpu-only";
+    argv[n] = NULL;
+    printf("iOS PoC: starting the runtime (%s; the executable %s)\n", cpu_only ? "CPU only" : "Metal",
+           on_phone ? "prepared here" : "the Mac prepared");
     int argc = 0;
     while (argv[argc]) ++argc;
     int code = bb_probe_main(argc, argv);
