@@ -23,7 +23,7 @@ is `launcher/`.
 
 ## This machine
 
-- The iPhone: `BB_IOS_DEVICE=<iPhone identifier>`, team `BB_IOS_TEAM=<team id>`.
+- The iPhone and the signing team: `BB_IOS_DEVICE` and `BB_IOS_TEAM` in `CLAUDE.local.md` (ignored).
   Keep it unlocked (Auto-Lock: Never) for test runs; `devicectl` cannot launch on a locked phone.
 - `runtime/deps` and `runtime/recomp/out` are links to the bloodborne-mac checkout's (built
   once; `deps` records absolute paths).
