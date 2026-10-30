@@ -427,6 +427,55 @@ static void *run_game(void *unused) {
     exit(code);
 }
 
+#ifdef BB_IOS_IN_LAUNCHER
+void bb_ios_screen_pixels(int *width, int *height); /* orientation.m */
+/* The game's output on the iPhone: 540 lines (the address space allows no more yet) at the
+ * screen's own ratio (2868x1320: 1174x540) when bbport.ini's aspect_ratio is auto or 16:9 (the
+ * launcher's default, which leaves bands on a phone), else at the chosen ratio. bbport.ini gets
+ * that output (and aspect_ratio=auto for the screen's ratio), so the camera and the HUD follow it
+ * (the launcher writes the file again at every Play). OUT: "WxH". */
+static void ios_output(const char *config, char *out, size_t out_size) {
+    char text[16384] = "", aspect[16] = "";
+    size_t length = 0;
+    FILE *f = fopen(config, "r");
+    if (f) {
+        length = fread(text, 1, sizeof(text) - 1, f);
+        fclose(f);
+    }
+    text[length] = 0;
+    for (char *line = text; line && *line;) {
+        if (!strncmp(line, "aspect_ratio=", 13)) sscanf(line + 13, "%15[^\r\n]", aspect);
+        line = strchr(line, '\n');
+        if (line) ++line;
+    }
+    int screen_w = 0, screen_h = 0;
+    bb_ios_screen_pixels(&screen_w, &screen_h);
+    double ratio = screen_h > 0 ? (double)screen_w / screen_h : 16.0 / 9.0;
+    const int screen_ratio = !*aspect || !strcmp(aspect, "auto") || !strcmp(aspect, "16:9");
+    if (!strcmp(aspect, "4:3")) ratio = 4.0 / 3.0;
+    else if (!strcmp(aspect, "16:10")) ratio = 16.0 / 10.0;
+    else if (!strcmp(aspect, "21:9")) ratio = 64.0 / 27.0;
+    else if (!strcmp(aspect, "32:9")) ratio = 32.0 / 9.0;
+    const int height = 540, width = (int)(height * ratio / 2.0 + 0.5) * 2;
+    snprintf(out, out_size, "%dx%d", width, height);
+    /* bbport.ini with that output (through a temporary file, so a crash keeps the old one). */
+    char temp[1200];
+    snprintf(temp, sizeof(temp), "%s.ios", config);
+    FILE *w = fopen(temp, "w");
+    if (!w) return;
+    for (char *line = text; line && *line;) {
+        char *end = strchr(line, '\n');
+        const size_t n = end ? (size_t)(end - line + 1) : strlen(line);
+        if (strncmp(line, "output_res=", 11) && !(screen_ratio && !strncmp(line, "aspect_ratio=", 13))) fwrite(line, 1, n, w);
+        line = end ? end + 1 : NULL;
+    }
+    fprintf(w, "output_res=%s\n", out);
+    if (screen_ratio) fputs("aspect_ratio=auto\n", w);
+    if (fclose(w) == 0) rename(temp, config);
+    printf("iOS PoC: output %s (%s, the screen %dx%d)\n", out, screen_ratio ? "the screen's ratio" : aspect, screen_w, screen_h);
+}
+#endif
+
 /* Sets up and runs the game; returns only if it could not start (as main's exit code). */
 static int start(const char *data_dir) {
     snprintf(documents, sizeof(documents), "%s", data_dir);
@@ -470,6 +519,16 @@ static int start(const char *data_dir) {
     if (clock_out) fclose(clock_out);
     mkdir(grab_dir, 0755);
 #endif
+#ifdef BB_IOS_IN_LAUNCHER
+    /* The game's output takes the screen's shape (ios_output below); BB_RENDER_RES and
+     * BB_OUTPUT_RES set by a test run win. */
+    {
+        char output[32];
+        ios_output(config, output, sizeof(output));
+        setenv("BB_RENDER_RES", output, 0);
+        setenv("BB_OUTPUT_RES", output, 0);
+    }
+#endif
     const char *defaults[][2] = {
         {"BB_METAL_FRAME", "1"}, {"BB_METAL_NATIVE_BOOT", "1"}, {"BB_GFX_BACKEND", "metal"},
         {"BB_PC_MODEL", "0"}, {"BB_GUEST_IN_PLACE", "0"}, {"BB_UFFD", "0"}, {"BB_PREUPLOAD", "1"},
@@ -479,9 +538,12 @@ static int start(const char *data_dir) {
         /* One Metal buffer over guest memory: the Mac's overlapping windows (a MoltenVK
          * workaround) pinned 512 MiB twice, and pinned memory got the app killed. */
         {"BB_POOL_SPLIT", "0"},
+        {"BB_AUTO_RENDER_RES", "1"},
+#ifndef BB_IOS_IN_LAUNCHER
         /* 960x540 for now (the patches.bin copied over is made for it): a quarter of 1080p's
          * targets, memory and address space. */
-        {"BB_RENDER_RES", "960x540"}, {"BB_OUTPUT_RES", "960x540"}, {"BB_AUTO_RENDER_RES", "1"},
+        {"BB_RENDER_RES", "960x540"}, {"BB_OUTPUT_RES", "960x540"},
+#endif
 #ifdef BB_IOS_IN_LAUNCHER
         /* No Metal binary archive inside the launcher: Metal holds a loaded one at many times its
          * size, address space the game's start does not have next to the launcher (runtime

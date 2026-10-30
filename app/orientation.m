@@ -91,3 +91,11 @@ void bb_ios_landscape(void) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
     printf("iOS PoC: landscape %s\n", UIInterfaceOrientationIsLandscape(scene.effectiveGeometry.interfaceOrientation) ? "set" : "not set");
 }
+
+/* The screen's size in pixels, landscape (wider than tall): the game's output takes its shape. */
+void bb_ios_screen_pixels(int *width, int *height) {
+    const CGRect bounds = UIScreen.mainScreen.nativeBounds;
+    const int a = (int)bounds.size.width, b = (int)bounds.size.height;
+    *width = a > b ? a : b;
+    *height = a > b ? b : a;
+}
