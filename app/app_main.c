@@ -402,6 +402,17 @@ static void *run_game(void *unused) {
     argv[n++] = "bb-probe";
     argv[n++] = on_phone ? "-" : boot;
     if (!on_phone) argv[n++] = "--content-profile", argv[n++] = content;
+#ifdef BB_IOS_IN_LAUNCHER
+    /* The game builds its patches at start (the runtime's `--patches -`) from the app's
+     * patches/Bloodborne.xml and the launcher's bbport.ini and patch folder. */
+    {
+        const char *base = SDL_GetBasePath();
+        char xml[1100];
+        snprintf(xml, sizeof(xml), "%spatches/Bloodborne.xml", base ? base : "");
+        setenv("BB_PATCHES_XML", xml, 0);
+        snprintf(patches, sizeof(patches), "-");
+    }
+#endif
     argv[n++] = "--patches", argv[n++] = patches, argv[n++] = "--app0", argv[n++] = game;
     argv[n++] = "--user", argv[n++] = user, argv[n++] = "--timeout", argv[n++] = (char *)(timeout ? timeout : "0");
     if (cpu_only) argv[n++] = "--cpu-only";
@@ -439,9 +450,13 @@ static int start(const char *data_dir) {
     /* What run.sh sets on Apple Silicon (the native Metal frame, the 0.3 memory model, copies of
      * GPU buffers at submit, write twins, a 60 Hz vblank), the saves and settings in Documents,
      * English, frame statistics in the log, and the test banner every test run shows. */
-    char user_dir[1100], config[1100], grab_trigger[1100], grab_dir[1100];
+    char user_dir[1100], config[1100];
     snprintf(user_dir, sizeof(user_dir), "%s/user", documents);
     snprintf(config, sizeof(config), "%s/bbport.ini", documents);
+#ifndef BB_IOS_IN_LAUNCHER
+    /* The proof of concept's test hooks; the launcher's game has none (a test run of it passes
+     * BB_TEST_TITLE and BB_TEST_DETAIL itself, for the banner). */
+    char grab_trigger[1100], grab_dir[1100];
     /* tools/grab.sh's frame dumps: the game's own frame when Documents/grab.trigger appears. */
     snprintf(grab_trigger, sizeof(grab_trigger), "%s/grab.trigger", documents);
     snprintf(grab_dir, sizeof(grab_dir), "%s/grab", documents);
@@ -454,32 +469,33 @@ static int start(const char *data_dir) {
     FILE *clock_out = fopen(clock_file, "w"); /* empty: the banner counts up until trial.sh sets the end */
     if (clock_out) fclose(clock_out);
     mkdir(grab_dir, 0755);
+#endif
     const char *defaults[][2] = {
         {"BB_METAL_FRAME", "1"}, {"BB_METAL_NATIVE_BOOT", "1"}, {"BB_GFX_BACKEND", "metal"},
         {"BB_PC_MODEL", "0"}, {"BB_GUEST_IN_PLACE", "0"}, {"BB_UFFD", "0"}, {"BB_PREUPLOAD", "1"},
         {"BB_COPY_GPU_BUFFERS", "1"}, {"BB_GPU_WRITE_TWINS", "1"}, {"BB_GPU_WRITE_TWINS_MAX", "65536"},
-        {"BB_VBLANK_HZ", "60"}, {"BB_LANGUAGE", "1"}, {"BB_UI_LANGUAGE", "en"}, {"BB_FRAME_STATS", "1"},
-        {"BB_GPU_USER_DIR", user_dir}, {"BB_CONFIG", config},
+        {"BB_VBLANK_HZ", "60"}, {"BB_GPU_USER_DIR", user_dir}, {"BB_CONFIG", config},
         {"BB_UI_SCALE", "1.75"},
-        {"BB_PAD_FILE", pad_file}, /* scripts/ios/press.sh: buttons pressed from the Mac */
-        {"BB_TEST_CLOCK", clock_file}, /* scripts/ios/trial.sh: when it closes the app */
         /* One Metal buffer over guest memory: the Mac's overlapping windows (a MoltenVK
          * workaround) pinned 512 MiB twice, and pinned memory got the app killed. */
         {"BB_POOL_SPLIT", "0"},
         /* 960x540 for now (the patches.bin copied over is made for it): a quarter of 1080p's
          * targets, memory and address space. */
         {"BB_RENDER_RES", "960x540"}, {"BB_OUTPUT_RES", "960x540"}, {"BB_AUTO_RENDER_RES", "1"},
-        {"BB_PRESENT_DUMP_TRIGGER", grab_trigger}, {"BB_DUMP_DIR", grab_dir},
 #ifdef BB_IOS_IN_LAUNCHER
         /* No Metal binary archive inside the launcher: Metal holds a loaded one at many times its
          * size, address space the game's start does not have next to the launcher (runtime
-         * mtl_pso_cache.mm). Pipelines are compiled when first used. */
+         * mtl_pso_cache.mm). Pipelines are compiled when first used. The language, the frame
+         * statistics and the other settings come from the launcher (its environment). */
         {"BB_METAL_ARCHIVE", "0"},
-        {"BB_TEST_TITLE", "One app: the game from the launcher's Play"},
 #else
+        {"BB_LANGUAGE", "1"}, {"BB_UI_LANGUAGE", "en"}, {"BB_FRAME_STATS", "1"},
+        {"BB_PAD_FILE", pad_file}, /* scripts/ios/press.sh: buttons pressed from the Mac */
+        {"BB_TEST_CLOCK", clock_file}, /* scripts/ios/trial.sh: when it closes the app */
+        {"BB_PRESENT_DUMP_TRIGGER", grab_trigger}, {"BB_DUMP_DIR", grab_dir},
         {"BB_TEST_TITLE", "iOS PoC P2: Metal on the iPhone"},
-#endif
         {"BB_TEST_DETAIL", "Native 1080p, recompiled library, no JIT, file-backed guest memory"},
+#endif
     };
     for (size_t i = 0; i < sizeof(defaults) / sizeof(*defaults); ++i) setenv(defaults[i][0], defaults[i][1], 0);
     /* bbport.ini's starting values: the FPS counter on, large, at the bottom left (clear of the

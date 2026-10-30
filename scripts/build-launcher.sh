@@ -38,13 +38,16 @@ for f in AVFoundation AudioToolbox CoreAudio CoreBluetooth CoreFoundation CoreGr
     DEVELOPMENT_TEAM="$BB_IOS_TEAM" OTHER_LDFLAGS="\$(inherited) ${libs[*]} ${frameworks[*]} -lc++ -lz -lbz2 -liconv" \
     build 2>&1) | grep -E "error:|Undefined symbols|^  \"_|BUILD (SUCCEEDED|FAILED)" | head -40
 app=$out/xcode/Build/Products/$config-iphoneos/Bloodborne.app
+identity=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')
+# The game's patch file: the game builds its patches from it at start (--patches -).
+mkdir -p "$app/patches"
+cp -f runtime/patches/Bloodborne.xml "$app/patches/"
 # The player's own recompiled library (scripts/ios/recomp.sh), when built; without it the game's
-# code is interpreted. Added after Xcode signed the app, so both are signed again.
+# code is interpreted. Both are added after Xcode signed the app, so it is signed again.
 if [[ -f runtime/out/ios/librecomp.dylib ]]; then
-    identity=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')
     mkdir -p "$app/Frameworks"
     cp -f runtime/out/ios/librecomp.dylib "$app/Frameworks/"
     codesign --force --sign "$identity" "$app/Frameworks/librecomp.dylib"
-    codesign --force --sign "$identity" --preserve-metadata=identifier,entitlements,requirements "$app"
 fi
+codesign --force --sign "$identity" --preserve-metadata=identifier,entitlements,requirements "$app"
 xcrun devicectl device install app --device "$BB_IOS_DEVICE" "$app" 2>&1 | grep -E "App installed|rror"
