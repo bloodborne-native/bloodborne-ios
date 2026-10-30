@@ -429,13 +429,14 @@ static void *run_game(void *unused) {
 
 #ifdef BB_IOS_IN_LAUNCHER
 void bb_ios_screen_pixels(int *width, int *height); /* orientation.m */
-/* The game's output on the iPhone: 540 lines (the address space allows no more yet) at the
- * screen's own ratio (2868x1320: 1174x540) when bbport.ini's aspect_ratio is auto or 16:9 (the
- * launcher's default, which leaves bands on a phone), else at the chosen ratio. bbport.ini gets
- * that output (and aspect_ratio=auto for the screen's ratio), so the camera and the HUD follow it
- * (the launcher writes the file again at every Play). OUT: "WxH". */
+/* The game's output on the iPhone: the launcher's choice (bbport.ini output_res and
+ * aspect_ratio, its Graphics page) at most 540 lines tall (the address space allows no more yet;
+ * 540 when unset), at the screen's own ratio for auto (2868x1320: 1174x540), else at the chosen
+ * ratio. bbport.ini gets that output, so the camera and the HUD follow it (the launcher writes the
+ * file again at every Play). OUT: "WxH". */
 static void ios_output(const char *config, char *out, size_t out_size) {
     char text[16384] = "", aspect[16] = "";
+    int chosen_height = 0;
     size_t length = 0;
     FILE *f = fopen(config, "r");
     if (f) {
@@ -445,18 +446,21 @@ static void ios_output(const char *config, char *out, size_t out_size) {
     text[length] = 0;
     for (char *line = text; line && *line;) {
         if (!strncmp(line, "aspect_ratio=", 13)) sscanf(line + 13, "%15[^\r\n]", aspect);
+        if (!strncmp(line, "output_res=", 11)) sscanf(line + 11, "%*dx%d", &chosen_height);
         line = strchr(line, '\n');
         if (line) ++line;
     }
     int screen_w = 0, screen_h = 0;
     bb_ios_screen_pixels(&screen_w, &screen_h);
     double ratio = screen_h > 0 ? (double)screen_w / screen_h : 16.0 / 9.0;
-    const int screen_ratio = !*aspect || !strcmp(aspect, "auto") || !strcmp(aspect, "16:9");
+    const int screen_ratio = !*aspect || !strcmp(aspect, "auto");
     if (!strcmp(aspect, "4:3")) ratio = 4.0 / 3.0;
+    else if (!strcmp(aspect, "16:9")) ratio = 16.0 / 9.0;
     else if (!strcmp(aspect, "16:10")) ratio = 16.0 / 10.0;
     else if (!strcmp(aspect, "21:9")) ratio = 64.0 / 27.0;
     else if (!strcmp(aspect, "32:9")) ratio = 32.0 / 9.0;
-    const int height = 540, width = (int)(height * ratio / 2.0 + 0.5) * 2;
+    const int height = chosen_height >= 360 && chosen_height <= 540 ? chosen_height : 540;
+    const int width = (int)(height * ratio / 2.0 + 0.5) * 2;
     snprintf(out, out_size, "%dx%d", width, height);
     /* bbport.ini with that output (through a temporary file, so a crash keeps the old one). */
     char temp[1200];
