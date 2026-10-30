@@ -17,6 +17,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
+#include <malloc/malloc.h>
 /* In libSystem on iOS too, but not in the iOS SDK headers. */
 int proc_regionfilename(int pid, uint64_t address, void *buffer, uint32_t buffersize);
 #include <errno.h>
@@ -106,10 +107,12 @@ static void exit_backtrace(void) {
  * allocations go): its largest free gap, what uses it by memory tag (1-11 malloc, 21 IOKit,
  * 30 stacks, 33 dylibs, 63 JavaScriptCore; 0 untagged: mapped files and plain mmap), and the memory
  * left under the app's limit, to fd 2 (the log file): at the game's start and at an abort. */
-static void report_room(const char *when) {
+typedef struct { vm_size_t largest, used, by_tag[256]; } Room;
+static void measure_room(Room *room) {
     const vm_address_t shared_cache = (vm_address_t)0x180000000;
     vm_address_t at = (vm_address_t)1 << 32, previous_end = 0;
-    vm_size_t largest = 0, used = 0, by_tag[256] = {0};
+    vm_size_t largest = 0, used = 0, *by_tag = room->by_tag;
+    memset(room, 0, sizeof(*room));
     for (;;) {
         vm_size_t size = 0;
         natural_t depth = 0;
@@ -128,11 +131,19 @@ static void report_room(const char *when) {
         previous_end = end;
         at += size;
     }
+    room->largest = largest, room->used = used;
+}
+static void print_room(const char *when, const Room *room) {
     dprintf(2, "iOS PoC: room %s: largest free gap %lu MiB, %lu MiB used below the shared cache, %lu MiB left under the memory limit; by tag:",
-            when, (unsigned long)(largest >> 20), (unsigned long)(used >> 20), (unsigned long)(os_proc_available_memory() >> 20));
+            when, (unsigned long)(room->largest >> 20), (unsigned long)(room->used >> 20), (unsigned long)(os_proc_available_memory() >> 20));
     for (int tag = 0; tag < 256; ++tag)
-        if (by_tag[tag] >= ((vm_size_t)8 << 20)) dprintf(2, " %d=%lu", tag, (unsigned long)(by_tag[tag] >> 20));
+        if (room->by_tag[tag] >= ((vm_size_t)8 << 20)) dprintf(2, " %d=%lu", tag, (unsigned long)(room->by_tag[tag] >> 20));
     dprintf(2, " MiB\n");
+}
+static void report_room(const char *when) {
+    static Room room; /* static: also called from the abort handler, on a small stack */
+    measure_room(&room);
+    print_room(when, &room);
 }
 
 /* An abort before main (an initializer): its backtrace into the log. */
@@ -460,6 +471,10 @@ static int start(const char *data_dir) {
         {"BB_RENDER_RES", "960x540"}, {"BB_OUTPUT_RES", "960x540"}, {"BB_AUTO_RENDER_RES", "1"},
         {"BB_PRESENT_DUMP_TRIGGER", grab_trigger}, {"BB_DUMP_DIR", grab_dir},
 #ifdef BB_IOS_IN_LAUNCHER
+        /* No Metal binary archive inside the launcher: Metal holds a loaded one at many times its
+         * size, address space the game's start does not have next to the launcher (runtime
+         * mtl_pso_cache.mm). Pipelines are compiled when first used. */
+        {"BB_METAL_ARCHIVE", "0"},
         {"BB_TEST_TITLE", "One app: the game from the launcher's Play"},
 #else
         {"BB_TEST_TITLE", "iOS PoC P2: Metal on the iPhone"},
@@ -521,7 +536,27 @@ static void start_from_timer(CFRunLoopTimerRef timer, void *unused) {
     (void)unused;
     CFRunLoopTimerInvalidate(timer);
     CFRelease(timer);
-    report_room("from the timer, after the launcher's window was destroyed");
+    /* The launcher's window was destroyed (its Rust side, at Play): WebKit's teardown runs on the
+     * main run loop. Up to 3 s for it, free malloc memory given back each 100 ms, the low region
+     * measured and logged when it changes; the game starts once it is steady for a second. */
+    static Room room, last;
+    measure_room(&last);
+    print_room("after the launcher's window was destroyed", &last);
+    for (int tick = 0, steady = 0; tick < 30 && steady < 10; ++tick) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+        malloc_zone_pressure_relief(NULL, 0);
+        measure_room(&room);
+        if (room.used == last.used && room.largest == last.largest) {
+            ++steady;
+            continue;
+        }
+        steady = 0;
+        char when[64];
+        snprintf(when, sizeof(when), "%.1f s later", (tick + 1) / 10.0);
+        print_room(when, &room);
+        last = room;
+    }
+    report_room("when the game starts");
     const int code = start(launcher_data_dir);
     printf("iOS PoC: the game could not start (%d)\n", code);
 }
