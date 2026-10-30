@@ -17,7 +17,11 @@ L=out/logs/trial-$name.log
 printf '%b' "$ini" > out/logs/trial.ini
 xcrun devicectl device copy to --device "$U" --domain-type appDataContainer --domain-identifier "$A" \
     --source out/logs/trial.ini --destination Documents/bbport.ini >/dev/null 2>&1
-ENV="{\"BB_IOS_PROBE_ONLY\":\"0\",\"BB_IOS_METAL_TEST\":\"0\",\"BB_IOS_FILE_TEST\":\"0\",\"BB_IOS_GUARD_TEST\":\"0\",\"BB_IOS_CPU_ONLY\":\"0\",\"BB_IOS_SAVE\":\"mac-save\",\"BB_RECOMP_TARGETS\":\"${TARGETS:-0}\",\"MTL_HUD_ENABLED\":\"0\",\"BB_LOG_LONG_CB_MS\":\"25\"${extra:+,$extra}}"
+# The run's banner (BB_TEST_TITLE, BB_TEST_DETAIL): the app's own defaults apply only when the
+# launch passes none, so pass them, escaped for the JSON.
+json() { local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
+banner=${BB_TEST_TITLE:+,\"BB_TEST_TITLE\":\"$(json "$BB_TEST_TITLE")\"}${BB_TEST_DETAIL:+,\"BB_TEST_DETAIL\":\"$(json "$BB_TEST_DETAIL")\"}
+ENV="{\"BB_IOS_PROBE_ONLY\":\"0\",\"BB_IOS_METAL_TEST\":\"0\",\"BB_IOS_FILE_TEST\":\"0\",\"BB_IOS_GUARD_TEST\":\"0\",\"BB_IOS_CPU_ONLY\":\"0\",\"BB_IOS_SAVE\":\"mac-save\",\"BB_RECOMP_TARGETS\":\"${TARGETS:-0}\",\"MTL_HUD_ENABLED\":\"0\",\"BB_LOG_LONG_CB_MS\":\"25\"${banner}${extra:+,$extra}}"
 # A console session still attached to an earlier run keeps writing to its log (a NUL gap, then
 # "The app terminated" when this launch ends that app): end it, and start from a new file.
 pkill -f "devicectl device process launch --device $U" 2>/dev/null; rm -f "$L"
