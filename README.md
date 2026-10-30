@@ -6,6 +6,13 @@ it on your Mac and install it on your own iPhone with your own Apple ID. Nothing
 distributed, and no game files are included: the app runs your own dump, and the recompiled
 library is built on your Mac from your own copy.
 
+> **A proof of concept, not the focus of development.** It was made to see how far the game runs
+> on an iPhone, and what it found is written up here. The project's work goes into the macOS app,
+> [bloodborne-mac](https://github.com/bloodborne-native/bloodborne-mac), and the runtime it is
+> built on ([status](https://github.com/bloodborne-native/bloodborne-mac/blob/main/docs/STATUS.md)).
+> iOS gains from that work, since it shares the same runtime and launcher, but it gets no
+> releases and no promise of updates or support.
+
 Built on [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside28 and
 [shadPS4](https://github.com/shadps4-emu/shadPS4). The other projects whose code or designs are
 used are credited in the runtime's and the app's `CREDITS.md`.
