@@ -63,7 +63,9 @@ What the iPhone allows, what it does not, and everything measured so far:
   crash (`bisect.sh`).
 - `docs/FINDINGS.md`: what the iPhone allows and what was measured.
 - `runtime/`: [bloodborne-runtime](https://github.com/bloodborne-native/bloodborne-runtime), the
-  game (its iOS code behind `TARGET_OS_IPHONE`), with the recompiler in `runtime/recomp/`. The
+  game (its iOS code behind `TARGET_OS_IPHONE`), with the recompiler in `runtime/recomp/` and
+  [bbcpu](https://github.com/bloodborne-native/bbcpu), the CPU layer, in `runtime/bbcpu/` from
+  runtime `e1b89553` on. The
   runtime's [`docs/IOS_POC.md`](https://github.com/bloodborne-native/bloodborne-runtime/blob/main/docs/IOS_POC.md)
   covers its iOS parts.
 - `launcher/`: [bloodborne-launcher](https://github.com/bloodborne-native/bloodborne-launcher).
