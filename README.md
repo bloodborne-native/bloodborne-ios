@@ -17,6 +17,11 @@ Built on [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside28
 [shadPS4](https://github.com/shadps4-emu/shadPS4). The other projects whose code or designs are
 used are credited in the runtime's and the app's `CREDITS.md`.
 
+The iPhone is one example of what the project's goal makes possible: a game with no
+[layer standing in for a PS4](https://github.com/bloodborne-native/bloodborne-mac/blob/main/docs/ROADMAP.md#the-ps4-layers), on any
+platform. iOS has no JIT, so a game translated while it runs cannot work here: the recompiled library
+is what lets it run at all.
+
 What the iPhone allows, what it does not, and everything measured so far:
 [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
