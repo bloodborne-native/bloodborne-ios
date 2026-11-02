@@ -4,8 +4,7 @@ The iOS app of Bloodborne (PS4, CUSA03173 1.09): the app shell, its build, signi
 scripts, and what being an app on the iPhone means (touch controls, files, the launcher as its
 interface). Private while it is a proof of concept. The game is the `runtime/` submodule
 (bloodborne-runtime, on its `main`: the iOS code is behind `TARGET_OS_IPHONE` there since 2026-10-29) with the recompiler in `runtime/recomp/`; the launcher
-is `launcher/`. bbcpu, the CPU layer, is [its own repository](https://github.com/bloodborne-native/bbcpu): `runtime/bbcpu/`
-from runtime `e1b89553` on, so run `git submodule update --init --recursive` after bumping past it.
+is `launcher/`. bbcpu, the CPU layer, is [its own repository](https://github.com/bloodborne-native/bbcpu), at `runtime/bbcpu/`.
 
 ## Read first
 
